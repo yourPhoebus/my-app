@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Polygon Web Components</title>
+  </head>
+  <body>
+    <polygon-app></polygon-app>
+
+    <script>
+      const template = document.createElement("template");
+      template.innerHTML = `
+    <style>
+      :host {
+        display: block;
+        font-family: sans-serif;
+      }
+      .container {
+        display: flex;
+        width: 100%;
+        height: 95vh;
+        margin: auto;
+        border: 1px solid #444;
+        box-sizing: border-box;
+      }
+      .workspace {
+        flex: 1;
+        background: #aaa;
+        position: relative;
+      }
+      .panel {
+        width: 250px;
+        background: #333;
+        color: #ccc;
+        display: flex;
+        flex-direction: column;
+        padding: 10px;
+        box-sizing: border-box;
+      }
+      .btn {
+        margin-bottom: 10px;
+        padding: 8px;
+        background: #555;
+        color: #fff;
+        border: none;
+        cursor: pointer;
+      }
+      .btn:disabled {
+        background: #999;
+        cursor: default;
+      }
+      .btn:hover:enabled {
+        background: #666;
+      }
+      .status {
+        margin-bottom: 15px;
+        font-weight: bold;
+      }
+      .points-count {
+        margin-left: 10px;
+        font-weight: normal;
+      }
+      .points-count.green {
+        color: #28a745;
+      }
+      .points-count.red {
+        color: #dc3545;
+      }
+      .label-and-value {
+        display: flex;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+      .label-and-value .value {
+        margin-left: 10px;
+        color: #fff;
+        font-weight: bold;
+      }
+      .path-display {
+        margin-top: auto;
+        padding-top: 10px;
+        border-top: 1px solid #555;
+      }
+
+      svg {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      .polygon {
+        fill: none;
+        stroke: #000;
+        stroke-width: 2px;
+      }
+      .path {
+        fill: none;
+        stroke: blue;
+        stroke-width: 3px;
+      }
+      .point {
+        fill: #fff;
+        stroke: #000;
+        stroke-width: 1px;
+        cursor: pointer;
+      }
+      .point-label {
+        fill: #000;
+        font-size: 14px;
+        text-anchor: middle;
+        alignment-baseline: middle;
+        pointer-events: none;
+      }
+    </style>
+
+    <div class="container">
+      <div class="workspace">
+        <svg id="svgRoot"></svg>
+      </div>
+
+      <div class="panel">
+        <div class="status">
+          <strong>Create polygon</strong>
+        </div>
+        <button id="btnCreatePoints" class="btn">Create points</button>
+        <div class="status">
+          <span id="createdLabel">Created <span id="pointsCount" class="points-count">0</span> points</span>
+        </div>
+        <button id="btnDrawPolygon" class="btn" disabled>Draw polygon</button>
+
+        <div class="status">
+          <strong>Create path</strong>
+        </div>
+        <div class="label-and-value">
+          <button id="btnFirstPoint" class="btn" disabled>First point</button>
+          <div class="value" id="firstPointName">—</div>
+        </div>
+        <div class="label-and-value">
+          <button id="btnSecondPoint" class="btn" disabled>Second point</button>
+          <div class="value" id="secondPointName">—</div>
+        </div>
+        <button id="btnToggleOrder" class="btn" disabled>clockwise</button>
+        <button id="btnClear" class="btn" disabled>clear</button>
+
+        <div class="path-display">
+          <div>Path: <span id="pathOutput">—</span></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+      class PolygonApp extends HTMLElement {
+        constructor() {
+          super();
+          this.attachShadow({ mode: "open" });
+          this.shadowRoot.appendChild(template.content.cloneNode(true));
+
+          this.svgRoot = this.shadowRoot.getElementById("svgRoot");
+          this.btnCreatePoints =
+            this.shadowRoot.getElementById("btnCreatePoints");
+          this.btnDrawPolygon =
+            this.shadowRoot.getElementById("btnDrawPolygon");
+          this.pointsCount = this.shadowRoot.getElementById("pointsCount");
+          this.btnFirstPoint = this.shadowRoot.getElementById("btnFirstPoint");
+          this.btnSecondPoint =
+            this.shadowRoot.getElementById("btnSecondPoint");
+          this.btnToggleOrder =
+            this.shadowRoot.getElementById("btnToggleOrder");
+          this.btnClear = this.shadowRoot.getElementById("btnClear");
+          this.firstPointName =
+            this.shadowRoot.getElementById("firstPointName");
+          this.secondPointName =
+            this.shadowRoot.getElementById("secondPointName");
+          this.pathOutput = this.shadowRoot.getElementById("pathOutput");
+
+          this.points = [];
+          this.firstIndex = null;
+          this.secondIndex = null;
+          this.isCreatingPoints = false;
+          this.isPolygonDrawn = false;
+          this.selectingFirst = false;
+          this.selectingSecond = false;
+          this.isClockwise = true; 
+
+          this.btnCreatePoints.addEventListener("click", () =>
+            this.onCreatePoints()
+          );
+          this.btnDrawPolygon.addEventListener("click", () =>
+            this.onDrawPolygon()
+          );
+          this.btnFirstPoint.addEventListener("click", () =>
+            this.onSelectFirstPoint()
+          );
+          this.btnSecondPoint.addEventListener("click", () =>
+            this.onSelectSecondPoint()
+          );
+          this.btnToggleOrder.addEventListener("click", () =>
+            this.onToggleOrder()
+          );
+          this.btnClear.addEventListener("click", () => this.onClearAll());
+          this.svgRoot.addEventListener("click", (evt) => this.onSvgClick(evt));
+        }
+
+        connectedCallback() {
+          this.loadState();
+          this.updateUIFromState();
+          this.redrawAll();
+        }
+
+
+        onCreatePoints() {
+          this.isCreatingPoints = true;
+          this.isPolygonDrawn = false;
+          this.selectingFirst = false;
+          this.selectingSecond = false;
+
+          this.points = [];
+          this.firstIndex = null;
+          this.secondIndex = null;
+
+          this.updateUIFromState();
+          this.clearSvg();
+          this.drawPoints();
+          this.saveState(); 
+        }
+
+        onDrawPolygon() {
+          this.isPolygonDrawn = true;
+          this.isCreatingPoints = false;
+          this.drawPolygon();
+
+          this.updateUIFromState();
+          this.saveState();
+        }
+
+        onSelectFirstPoint() {
+          this.selectingFirst = true;
+          this.selectingSecond = false;
+          this.saveState();
+        }
+
+        onSelectSecondPoint() {
+          this.selectingSecond = true;
+          this.selectingFirst = false;
+          this.saveState();
+        }
+
+        onToggleOrder() {
+          this.isClockwise = !this.isClockwise;
+          this.updateUIFromState();
+          this.redrawAll();
+          this.saveState();
+        }
+
+        onClearAll() {
+          this.points = [];
+          this.firstIndex = null;
+          this.secondIndex = null;
+          this.isCreatingPoints = false;
+          this.isPolygonDrawn = false;
+          this.selectingFirst = false;
+          this.selectingSecond = false;
+          this.isClockwise = true;
+
+          localStorage.removeItem("polygonAppState");
+
+          this.updateUIFromState();
+          this.clearSvg();
+          this.saveState();
+        }
+
+
+        onSvgClick(evt) {
+          const rect = this.svgRoot.getBoundingClientRect();
+          const x = evt.clientX - rect.left;
+          const y = evt.clientY - rect.top;
+
+          if (this.isCreatingPoints) {
+            this.addPoint(x, y);
+            return;
+          }
+
+          if (
+            this.isPolygonDrawn &&
+            (this.selectingFirst || this.selectingSecond)
+          ) {
+            const clickedIndex = this.findPointByCoords(x, y, 6);
+            if (clickedIndex !== null) {
+              if (this.selectingFirst) {
+                this.firstIndex = clickedIndex;
+                this.selectingFirst = false;
+              } else if (this.selectingSecond) {
+                this.secondIndex = clickedIndex;
+                this.selectingSecond = false;
+              }
+              this.updateUIFromState();
+              this.redrawAll();
+              this.saveState();
+            }
+          }
+        }
+
+
+        addPoint(x, y) {
+          const index = this.points.length + 1;
+          const name = "p" + index;
+          this.points.push({ x, y, name });
+          this.updateUIFromState();
+          this.redrawAll();
+          this.saveState();
+        }
+
+        findPointByCoords(clickX, clickY, radius) {
+          for (let i = 0; i < this.points.length; i++) {
+            const { x, y } = this.points[i];
+            const dx = x - clickX;
+            const dy = y - clickY;
+            if (Math.sqrt(dx * dx + dy * dy) <= radius) {
+              return i;
+            }
+          }
+          return null;
+        }
+
+        redrawAll() {
+          if (this.points.length === 0) {
+            this.clearSvg();
+            return;
+          }
+          if (!this.isPolygonDrawn) {
+            this.clearSvg();
+            this.drawPoints();
+          } else {
+            this.clearSvg();
+            this.drawPolygon();
+            this.updatePath();
+          }
+        }
+
+        drawPoints() {
+          this.points.forEach(({ x, y, name }) => {
+            const circle = document.createElementNS(
+              "http://www.w3.org/2000/svg",
+              "circle"
+            );
+            circle.setAttribute("cx", x);
+            circle.setAttribute("cy", y);
+            circle.setAttribute("r", 6);
+            circle.setAttribute("class", "point");
+            this.svgRoot.appendChild(circle);
+
+            const text = document.createElementNS(
+              "http://www.w3.org/2000/svg",
+              "text"
+            );
+            text.setAttribute("x", x);
+            text.setAttribute("y", y - 12);
+            text.setAttribute("class", "point-label");
+            text.textContent = name;
+            this.svgRoot.appendChild(text);
+          });
+        }
+
+        drawPolygon() {
+          const polygon = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "polygon"
+          );
+          polygon.setAttribute(
+            "points",
+            this.points.map((p) => `${p.x},${p.y}`).join(" ")
+          );
+          polygon.setAttribute("class", "polygon");
+          this.svgRoot.appendChild(polygon);
+
+          this.points.forEach(({ x, y, name }) => {
+            const circle = document.createElementNS(
+              "http://www.w3.org/2000/svg",
+              "circle"
+            );
+            circle.setAttribute("cx", x);
+            circle.setAttribute("cy", y);
+            circle.setAttribute("r", 6);
+            circle.setAttribute("class", "point");
+            this.svgRoot.appendChild(circle);
+
+            const text = document.createElementNS(
+              "http://www.w3.org/2000/svg",
+              "text"
+            );
+            text.setAttribute("x", x);
+            text.setAttribute("y", y - 12);
+            text.setAttribute("class", "point-label");
+            text.textContent = name;
+            this.svgRoot.appendChild(text);
+          });
+        }
+
+        updatePath() {
+          if (
+            this.firstIndex === null ||
+            this.secondIndex === null ||
+            !this.isPolygonDrawn
+          ) {
+            this.pathOutput.textContent = "—";
+            return;
+          }
+          const pathIndices = this.getPathIndices(
+            this.firstIndex,
+            this.secondIndex,
+            this.isClockwise
+          );
+          const polyline = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "polyline"
+          );
+          polyline.setAttribute(
+            "points",
+            pathIndices
+              .map((i) => `${this.points[i].x},${this.points[i].y}`)
+              .join(" ")
+          );
+          polyline.setAttribute("class", "path");
+          this.svgRoot.appendChild(polyline);
+
+          const names = pathIndices.map((i) => this.points[i].name);
+          this.pathOutput.textContent = names.join(" - ");
+        }
+
+        getPathIndices(start, end, clockwise) {
+          const n = this.points.length;
+          if (n < 2) return [];
+
+          const forward = [];
+          let idx = start;
+          while (true) {
+            forward.push(idx);
+            if (idx === end) break;
+            idx = (idx + 1) % n;
+          }
+
+          const backward = [];
+          idx = start;
+          while (true) {
+            backward.push(idx);
+            if (idx === end) break;
+            idx = (idx - 1 + n) % n;
+          }
+
+          return clockwise ? forward : backward;
+        }
+
+        clearSvg() {
+          while (this.svgRoot.firstChild) {
+            this.svgRoot.removeChild(this.svgRoot.firstChild);
+          }
+        }
+
+
+        updateUIFromState() {
+          this.btnCreatePoints.disabled =
+            this.isCreatingPoints || this.isPolygonDrawn;
+          const canDraw = this.points.length >= 3 && this.points.length <= 15;
+          this.btnDrawPolygon.disabled = !this.isCreatingPoints || !canDraw;
+
+          this.btnFirstPoint.disabled = !this.isPolygonDrawn;
+          this.btnSecondPoint.disabled = !this.isPolygonDrawn;
+
+          this.btnToggleOrder.disabled = !this.isPolygonDrawn;
+          if (this.isClockwise) {
+            this.btnToggleOrder.textContent = "clockwise";
+          } else {
+            this.btnToggleOrder.textContent = "counterclockwise";
+          }
+
+          const somethingCreated =
+            this.points.length > 0 || this.isPolygonDrawn;
+          this.btnClear.disabled = !somethingCreated;
+
+          this.firstPointName.textContent =
+            this.firstIndex != null && this.points[this.firstIndex]
+              ? this.points[this.firstIndex].name
+              : "—";
+          this.secondPointName.textContent =
+            this.secondIndex != null && this.points[this.secondIndex]
+              ? this.points[this.secondIndex].name
+              : "—";
+
+          this.pointsCount.textContent = this.points.length;
+          if (this.points.length >= 3 && this.points.length <= 15) {
+            this.pointsCount.classList.remove("red");
+            this.pointsCount.classList.add("green");
+          } else {
+            this.pointsCount.classList.remove("green");
+            this.pointsCount.classList.add("red");
+          }
+        }
+
+
+        saveState() {
+          const state = {
+            points: this.points,
+            firstIndex: this.firstIndex,
+            secondIndex: this.secondIndex,
+            isCreatingPoints: this.isCreatingPoints,
+            isPolygonDrawn: this.isPolygonDrawn,
+            selectingFirst: this.selectingFirst,
+            selectingSecond: this.selectingSecond,
+            isClockwise: this.isClockwise,
+          };
+          localStorage.setItem("polygonAppState", JSON.stringify(state));
+        }
+
+        loadState() {
+          const saved = localStorage.getItem("polygonAppState");
+          if (!saved) {
+            return;
+          }
+          try {
+            const obj = JSON.parse(saved);
+            this.points = obj.points || [];
+            this.firstIndex = obj.firstIndex;
+            this.secondIndex = obj.secondIndex;
+            this.isCreatingPoints = obj.isCreatingPoints;
+            this.isPolygonDrawn = obj.isPolygonDrawn;
+            this.selectingFirst = obj.selectingFirst;
+            this.selectingSecond = obj.selectingSecond;
+            this.isClockwise = obj.isClockwise !== false; 
+          } catch (e) {
+            console.warn("Ошибка парсинга состояния из localStorage:", e);
+          }
+        }
+      }
+
+      customElements.define("polygon-app", PolygonApp);
+    </script>
+  </body>
+</html>
